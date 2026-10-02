@@ -1,0 +1,30 @@
+export const theme = {
+  colors: {
+    primaryMaroon: '#7A0016',
+    primaryMaroonDark: '#580010',
+    primaryMaroonLight: '#9E0E27',
+    accentGold: '#D4AF37',
+    accentGoldLight: '#F3E5AB',
+    backgroundLight: '#F8F9FA',
+    cardLight: '#FFFFFF',
+    textDark: '#1F2937',
+    textMuted: '#6B7280',
+    border: '#E5E7EB',
+    statusSuccess: '#10B981',
+    statusWarning: '#F59E0B',
+  },
+  typography: {
+    fontFamily: 'System',
+    titleSize: 24,
+    headingSize: 18,
+    bodySize: 14,
+    smallSize: 12,
+  },
+  spacing: {
+    xs: 4,
+    sm: 8,
+    md: 16,
+    lg: 24,
+    xl: 32,
+  },
+};
