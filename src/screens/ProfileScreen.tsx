@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Image,
   Alert,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CommonActions } from '@react-navigation/native';
@@ -15,26 +17,51 @@ import { useAuth } from '../context/AuthContext';
 
 export const ProfileScreen: React.FC<any> = ({ navigation }) => {
   const { user, logout } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
   const member = user?.member;
   const name = member?.full_name || user?.email || 'Member';
   const photo = member?.profile_photo || member?.profile_image;
   const status = member?.status || 'PENDING';
 
+  const performLogout = async () => {
+    try {
+      setLoggingOut(true);
+      await logout();
+      const rootNav = navigation.getParent() || navigation;
+      try {
+        rootNav.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [{ name: 'Welcome' }],
+          })
+        );
+      } catch (err) {
+        rootNav.navigate('Welcome');
+      }
+    } catch (e) {
+      console.error('Logout error:', e);
+    } finally {
+      setLoggingOut(false);
+    }
+  };
+
   const handleLogout = () => {
+    if (Platform.OS === 'web') {
+      const confirmed = typeof window !== 'undefined'
+        ? window.confirm('Sign out of your NMPI member account?')
+        : true;
+      if (confirmed) {
+        performLogout();
+      }
+      return;
+    }
+
     Alert.alert('Sign Out', 'Sign out of your NMPI member account?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign Out',
         style: 'destructive',
-        onPress: async () => {
-          await logout();
-          navigation.dispatch(
-            CommonActions.reset({
-              index: 0,
-              routes: [{ name: 'Welcome' }],
-            })
-          );
-        },
+        onPress: performLogout,
       },
     ]);
   };
@@ -88,9 +115,20 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
         <Text style={styles.logoutText}>Surveys</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.85}>
-        <Ionicons name="log-out-outline" size={18} color="#FFF" />
-        <Text style={styles.logoutText}>Sign Out</Text>
+      <TouchableOpacity
+        style={styles.logoutBtn}
+        onPress={handleLogout}
+        activeOpacity={0.85}
+        disabled={loggingOut}
+      >
+        {loggingOut ? (
+          <ActivityIndicator size="small" color="#FFF" />
+        ) : (
+          <>
+            <Ionicons name="log-out-outline" size={18} color="#FFF" />
+            <Text style={styles.logoutText}>Sign Out</Text>
+          </>
+        )}
       </TouchableOpacity>
     </ScrollView>
   );
