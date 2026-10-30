@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,52 +11,23 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { theme } from '../styles/theme';
 import { useAuth } from '../context/AuthContext';
-
-// Master data fallback/defaults
-const DISTRICTS = [
-  { id: 1, name: 'Central Capital District', code: 'DIST-01' },
-  { id: 2, name: 'Northern Heights District', code: 'DIST-02' },
-  { id: 3, name: 'Southern Coastal District', code: 'DIST-03' },
-];
-
-const TALUKS: Record<number, Array<{ id: number; name: string }>> = {
-  1: [
-    { id: 1, name: 'Metro Central Taluk' },
-    { id: 2, name: 'East Suburban Taluk' },
-  ],
-  2: [
-    { id: 3, name: 'North Valley Taluk' },
-  ],
-  3: [
-    { id: 4, name: 'Harbor Port Taluk' },
-  ],
-};
-
-const UNITS: Record<number, Array<{ id: number; name: string }>> = {
-  1: [
-    { id: 1, name: 'Unit 01 - Civic Center' },
-    { id: 2, name: 'Unit 02 - Green Park Community' },
-  ],
-  2: [
-    { id: 3, name: 'Unit 03 - East Ridge Division' },
-  ],
-  3: [
-    { id: 4, name: 'Unit 04 - North Valley Chapter' },
-  ],
-  4: [
-    { id: 5, name: 'Unit 05 - Harbor Port Unit' },
-  ],
-};
-
-const MEMBERSHIP_TYPES = [
-  { id: 1, name: 'Regular Member', fee: '$10.00 / yr', desc: 'Standard annual community membership' },
-  { id: 2, name: 'Life Member', fee: '$100.00 / 10 yr', desc: 'Lifetime patron with full assembly voting' },
-  { id: 3, name: 'Youth Volunteer', fee: 'Free / 1 yr', desc: 'Youth community activist & volunteer' },
-];
+import {
+  masterData,
+  DistrictItem,
+  BlockItem,
+  ParliamentItem,
+  AssemblyItem,
+  VillageItem,
+  BLOOD_GROUPS,
+  COUNTRY_CODES,
+  JOIN_ROLE_OPTIONS,
+} from '../services/masterData';
 
 export const RegisterScreen: React.FC<any> = ({ navigation }) => {
   const { registerMember, setPrefilledEmail } = useAuth();
@@ -64,11 +35,16 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const totalSteps = 4;
 
+  // STEP 1: Personal Identification & Photo
+  const [profilePhoto, setProfilePhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [fullName, setFullName] = useState('');
   const [fatherName, setFatherName] = useState('');
   const [dob, setDob] = useState('1998-05-15');
   const [gender, setGender] = useState<'MALE' | 'FEMALE' | 'OTHER'>('MALE');
+  const [bloodGroup, setBloodGroup] = useState('O+');
 
+  // STEP 2: Contact & Identification
+  const [countryCode, setCountryCode] = useState('+91');
   const [email, setEmail] = useState('');
   const [mobile, setMobile] = useState('');
   const [aadhaar, setAadhaar] = useState('');
@@ -77,69 +53,291 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  const [address1, setAddress1] = useState('');
-  const [address2, setAddress2] = useState('');
-  const [village, setVillage] = useState('');
-  const [districtId, setDistrictId] = useState(1);
-  const [talukId, setTalukId] = useState(1);
-  const [stateName, setStateName] = useState('State Province');
-  const [pincode, setPincode] = useState('');
+  // STEP 3: Location & Constituencies (Dynamic Master Data)
+  const [districts, setDistricts] = useState<DistrictItem[]>([]);
+  const [selectedDistrictId, setSelectedDistrictId] = useState<number | null>(null);
 
-  const [membershipTypeId, setMembershipTypeId] = useState(1);
-  const [unitId, setUnitId] = useState(1);
+  const [blocks, setBlocks] = useState<BlockItem[]>([]);
+  const [selectedBlockId, setSelectedBlockId] = useState<number | null>(null);
+
+  const [parliaments, setParliaments] = useState<ParliamentItem[]>([]);
+  const [selectedParliamentId, setSelectedParliamentId] = useState<number | null>(null);
+
+  const [assemblies, setAssemblies] = useState<AssemblyItem[]>([]);
+  const [selectedAssemblyId, setSelectedAssemblyId] = useState<number | null>(null);
+
+  const [villages, setVillages] = useState<VillageItem[]>([]);
+  const [selectedVillageId, setSelectedVillageId] = useState<number | null>(null);
+  const [villageCustom, setVillageCustom] = useState('');
+  const [addressLine1, setAddressLine1] = useState('');
+
+  const [loadingDistricts, setLoadingDistricts] = useState(false);
+  const [loadingBlocks, setLoadingBlocks] = useState(false);
+  const [loadingParliaments, setLoadingParliaments] = useState(false);
+  const [loadingAssemblies, setLoadingAssemblies] = useState(false);
+  const [loadingVillages, setLoadingVillages] = useState(false);
+
+  // STEP 4: Role & Agreement
+  const [joinAs, setJoinAs] = useState('Primary Member');
+  const [roleId, setRoleId] = useState(1);
+  const [designation, setDesignation] = useState('');
   const [consentTerms, setConsentTerms] = useState(false);
 
+  // Submission & Feedback
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successData, setSuccessData] = useState<any | null>(null);
 
-  // When district changes, update taluk and unit default
-  const handleDistrictChange = (dId: number) => {
-    setDistrictId(dId);
-    const availableTaluks = TALUKS[dId] || TALUKS[1];
-    const newTalukId = availableTaluks[0]?.id || 1;
-    setTalukId(newTalukId);
-    const availableUnits = UNITS[newTalukId] || UNITS[1];
-    setUnitId(availableUnits[0]?.id || 1);
+  // Selection Modal state for large dropdowns
+  const [pickerModal, setPickerModal] = useState<{
+    visible: boolean;
+    title: string;
+    items: Array<{ id: number; label: string }>;
+    onSelect: (item: { id: number; label: string }) => void;
+  }>({
+    visible: false,
+    title: '',
+    items: [],
+    onSelect: () => {},
+  });
+  const [pickerSearch, setPickerSearch] = useState('');
+
+  // 1. Initial Master Data Fetch: Districts & Parliaments
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialData() {
+      setLoadingDistricts(true);
+      setLoadingParliaments(true);
+
+      const [distList, parlList] = await Promise.all([
+        masterData.getDistricts(),
+        masterData.getParliaments(),
+      ]);
+
+      if (!isMounted) return;
+
+      setDistricts(distList);
+      setParliaments(parlList);
+
+      if (distList.length > 0) {
+        setSelectedDistrictId(distList[0].id);
+      }
+      if (parlList.length > 0) {
+        setSelectedParliamentId(parlList[0].id);
+      }
+
+      setLoadingDistricts(false);
+      setLoadingParliaments(false);
+    }
+
+    loadInitialData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // 2. Load Blocks when District changes
+  useEffect(() => {
+    if (!selectedDistrictId) {
+      setBlocks([]);
+      setSelectedBlockId(null);
+      return;
+    }
+
+    let isMounted = true;
+    setLoadingBlocks(true);
+
+    masterData.getBlocks(selectedDistrictId).then((bList) => {
+      if (!isMounted) return;
+      setBlocks(bList);
+      if (bList.length > 0) {
+        setSelectedBlockId(bList[0].id);
+      } else {
+        setSelectedBlockId(null);
+      }
+      setLoadingBlocks(false);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedDistrictId]);
+
+  // 3. Load Assemblies when Parliament changes
+  useEffect(() => {
+    if (!selectedParliamentId) {
+      setAssemblies([]);
+      setSelectedAssemblyId(null);
+      return;
+    }
+
+    let isMounted = true;
+    setLoadingAssemblies(true);
+
+    masterData.getAssemblies(selectedParliamentId).then((aList) => {
+      if (!isMounted) return;
+      setAssemblies(aList);
+      if (aList.length > 0) {
+        setSelectedAssemblyId(aList[0].id);
+      } else {
+        setSelectedAssemblyId(null);
+      }
+      setLoadingAssemblies(false);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedParliamentId]);
+
+  // 4. Load Villages when Block changes
+  useEffect(() => {
+    if (!selectedBlockId) {
+      setVillages([]);
+      setSelectedVillageId(null);
+      return;
+    }
+
+    let isMounted = true;
+    setLoadingVillages(true);
+
+    masterData.getVillages(selectedBlockId).then((vList) => {
+      if (!isMounted) return;
+      setVillages(vList);
+      if (vList.length > 0) {
+        setSelectedVillageId(vList[0].id);
+      } else {
+        setSelectedVillageId(null);
+      }
+      setLoadingVillages(false);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedBlockId]);
+
+  // Photo Picking
+  const pickPhotoFromLibrary = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission Denied', 'Media library access is required to choose a profile photo.');
+        return;
+      }
+
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+
+      if (!res.canceled && res.assets && res.assets.length > 0) {
+        setProfilePhoto(res.assets[0]);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Could not pick photo');
+    }
   };
 
-  const handleTalukChange = (tId: number) => {
-    setTalukId(tId);
-    const availableUnits = UNITS[tId] || UNITS[1];
-    setUnitId(availableUnits[0]?.id || 1);
+  const takePhotoWithCamera = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission Denied', 'Camera permission is required to take a profile photo.');
+        return;
+      }
+
+      const res = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+
+      if (!res.canceled && res.assets && res.assets.length > 0) {
+        setProfilePhoto(res.assets[0]);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Could not take photo');
+    }
+  };
+
+  const openPicker = (
+    title: string,
+    items: Array<{ id: number; label: string }>,
+    onSelect: (item: { id: number; label: string }) => void
+  ) => {
+    setPickerSearch('');
+    setPickerModal({
+      visible: true,
+      title,
+      items,
+      onSelect: (it) => {
+        onSelect(it);
+        setPickerModal((prev) => ({ ...prev, visible: false }));
+      },
+    });
+  };
+
+  const filteredPickerItems = useMemo(() => {
+    if (!pickerSearch.trim()) return pickerModal.items;
+    const q = pickerSearch.trim().toLowerCase();
+    return pickerModal.items.filter((it) => it.label.toLowerCase().includes(q));
+  }, [pickerModal.items, pickerSearch]);
+
+  const isAdult = (dateStr: string) => {
+    if (!dateStr) return false;
+    const dobDate = new Date(`${dateStr}T00:00:00`);
+    if (Number.isNaN(dobDate.getTime())) return false;
+    const adult = new Date(dobDate);
+    adult.setFullYear(dobDate.getFullYear() + 18);
+    return adult <= new Date();
   };
 
   const validateStep = (step: number) => {
     if (step === 1) {
-      if (!fullName.trim()) {
-        Alert.alert('Required Field', 'Please enter your Full Name.');
+      if (!profilePhoto) {
+        Alert.alert('Profile Photo Required', 'Please choose or capture a clear passport-size profile photo.');
+        return false;
+      }
+      if (!fullName.trim() || fullName.trim().length < 2) {
+        Alert.alert('Full Name Required', 'Please enter your legal full name (at least 2 letters).');
         return false;
       }
       if (!fatherName.trim()) {
         Alert.alert('Required Field', "Please enter Father's / Guardian's Name.");
         return false;
       }
-      if (!dob.trim()) {
-        Alert.alert('Required Field', 'Please enter Date of Birth (YYYY-MM-DD).');
+      if (!dob.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(dob.trim())) {
+        Alert.alert('Date of Birth Required', 'Please enter Date of Birth in YYYY-MM-DD format (e.g. 1995-04-20).');
+        return false;
+      }
+      if (!isAdult(dob.trim())) {
+        Alert.alert('Age Requirement', 'You must be at least 18 years old to enroll as a member.');
         return false;
       }
       return true;
     }
 
     if (step === 2) {
-      if (!email.trim() || !email.includes('@')) {
+      const cleanPhone = mobile.replace(/\D/g, '');
+      if (cleanPhone.length !== 10) {
+        Alert.alert('Invalid Mobile Number', 'Please enter a valid 10-digit mobile number.');
+        return false;
+      }
+      if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
         Alert.alert('Invalid Email', 'Please enter a valid email address.');
         return false;
       }
-      if (!/^\d{10}$/.test(mobile.trim())) {
-        Alert.alert('Invalid Mobile', 'Please enter a valid 10-digit mobile number.');
+      const cleanAadhaar = aadhaar.replace(/\D/g, '');
+      if (cleanAadhaar.length !== 12) {
+        Alert.alert('Invalid Aadhaar', 'Aadhaar number must contain exactly 12 digits.');
         return false;
       }
-      if (!/^\d{12}$/.test(aadhaar.replace(/\s+/g, ''))) {
-        Alert.alert('Invalid Aadhaar', 'Aadhaar must be 12 digits.');
-        return false;
-      }
-      if (voterId.replace(/\s+/g, '').length < 6) {
-        Alert.alert('Invalid Voter ID', 'Voter ID must be at least 6 characters.');
+      const cleanVoter = voterId.replace(/[^A-Za-z0-9]/g, '');
+      if (cleanVoter.length < 6) {
+        Alert.alert('Invalid Voter ID', 'Voter ID must be at least 6 alphanumeric characters.');
         return false;
       }
       if (!password || password.length < 8) {
@@ -147,23 +345,27 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
         return false;
       }
       if (password !== confirmPassword) {
-        Alert.alert('Password Mismatch', 'Passwords do not match.');
+        Alert.alert('Password Mismatch', 'Passwords do not match. Please re-enter confirm password.');
         return false;
       }
       return true;
     }
 
     if (step === 3) {
-      if (!address1.trim()) {
-        Alert.alert('Required Field', 'Please enter Address Line 1.');
+      if (!selectedDistrictId) {
+        Alert.alert('District Required', 'Please select your District.');
         return false;
       }
-      if (!village.trim()) {
-        Alert.alert('Required Field', 'Please enter Village or Town.');
+      if (!selectedBlockId) {
+        Alert.alert('Taluk / Block Required', 'Please select your Taluk or Block.');
         return false;
       }
-      if (!pincode.trim() || pincode.length < 4) {
-        Alert.alert('Required Field', 'Please enter a valid postal pincode.');
+      if (!selectedParliamentId) {
+        Alert.alert('Parliament Constituency Required', 'Please select your Parliament constituency.');
+        return false;
+      }
+      if (!addressLine1.trim()) {
+        Alert.alert('Address Required', 'Please enter your Address Line 1 (Door no, Street name).');
         return false;
       }
       return true;
@@ -171,7 +373,7 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
 
     if (step === 4) {
       if (!consentTerms) {
-        Alert.alert('Consent Required', 'You must agree to the organization terms and constitution.');
+        Alert.alert('Agreement Required', 'You must agree to the organization constitution and terms.');
         return false;
       }
       return true;
@@ -202,26 +404,37 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
     if (!validateStep(4)) return;
 
     setIsSubmitting(true);
-    // Same field names as website POST /api/members/register
+
     const payload = {
       full_name: fullName.trim(),
       father_name: fatherName.trim(),
       date_of_birth: dob.trim(),
       gender,
-      country_code: '+91',
-      phone_number: mobile.trim(),
+      blood_group: bloodGroup,
+      country_code: countryCode.trim(),
+      phone_number: mobile.replace(/\D/g, ''),
       email: email.trim().toLowerCase(),
       password,
-      aadhaar_number: aadhaar.replace(/\s+/g, ''),
-      voter_id: voterId.replace(/\s+/g, '').toUpperCase(),
-      blood_group: 'O+',
+      aadhaar_number: aadhaar.replace(/\D/g, ''),
+      voter_id: voterId.replace(/[^A-Za-z0-9]/g, '').toUpperCase(),
       state_id: 1,
-      parliament_constituency_id: 1,
-      district_id: Number(districtId),
-      block_id: Number(talukId),
-      village_custom: village.trim(),
-      address_line1: address1.trim(),
-      role_id: 1,
+      parliament_constituency_id: selectedParliamentId,
+      assembly_constituency_id: selectedAssemblyId || undefined,
+      district_id: selectedDistrictId,
+      block_id: selectedBlockId,
+      village_id: selectedVillageId || undefined,
+      village_custom: villageCustom.trim() || undefined,
+      address_line1: addressLine1.trim(),
+      role_id: roleId,
+      join_as: joinAs,
+      designation: designation.trim() || joinAs,
+      profile_image: profilePhoto
+        ? {
+            uri: profilePhoto.uri,
+            name: profilePhoto.fileName || 'profile.jpg',
+            type: profilePhoto.mimeType || 'image/jpeg',
+          }
+        : null,
       consent_terms: true,
     };
 
@@ -237,25 +450,27 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
       }
     } catch (err: any) {
       setIsSubmitting(false);
-      Alert.alert('Error', err.message || 'An unexpected error occurred.');
+      Alert.alert('Registration Error', err.message || 'An unexpected error occurred.');
     }
   };
 
-  const handleSuccessClose = () => {
-    setSuccessData(null);
-    navigation.navigate('Login');
-  };
+  const selectedDistrictName = districts.find((d) => d.id === selectedDistrictId)?.name_en || 'Select District';
+  const selectedBlockName = blocks.find((b) => b.id === selectedBlockId)?.name_en || (loadingBlocks ? 'Loading taluks...' : 'Select Taluk/Block');
+  const selectedParlName = parliaments.find((p) => p.id === selectedParliamentId)?.name_en || 'Select Parliament';
+  const selectedAssemblyName = assemblies.find((a) => a.id === selectedAssemblyId)?.name_en || 'Select Assembly (Optional)';
+  const selectedVillageName = villages.find((v) => v.id === selectedVillageId)?.name_en || 'Select Village/Ward (Optional)';
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.keyboardContainer}
     >
+      {/* Top Header */}
       <View style={styles.topHeader}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={22} color="#FFF" />
           <Text style={styles.backButtonText}>
-            {currentStep === 1 ? 'Sign In' : 'Step ' + (currentStep - 1)}
+            {currentStep === 1 ? 'Sign In' : `Step ${currentStep - 1}`}
           </Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Member Registration</Text>
@@ -270,9 +485,9 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
           </Text>
           <Text style={styles.stepTitleText}>
             {currentStep === 1 && 'Personal Information'}
-            {currentStep === 2 && 'Account & Security'}
-            {currentStep === 3 && 'Residential Address'}
-            {currentStep === 4 && 'Membership & Agreement'}
+            {currentStep === 2 && 'Contact & Identity'}
+            {currentStep === 3 && 'Location & Constituencies'}
+            {currentStep === 4 && 'Role & Agreement'}
           </Text>
         </View>
         <View style={styles.progressBarTrack}>
@@ -290,19 +505,72 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        {/* STEP 1: PERSONAL INFORMATION */}
+        {/* ============================================================ */}
+        {/* STEP 1: PERSONAL INFORMATION & PROFILE PHOTO */}
+        {/* ============================================================ */}
         {currentStep === 1 && (
           <View style={styles.stepCard}>
             <View style={styles.stepHeaderRow}>
               <View style={styles.iconCircle}>
                 <Ionicons name="person" size={20} color={theme.colors.accentGold} />
               </View>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.cardHeaderTitle}>Personal Identification</Text>
-                <Text style={styles.cardHeaderSub}>Provide your legal personal credentials</Text>
+                <Text style={styles.cardHeaderSub}>Passport photo, legal name, date of birth & blood group</Text>
               </View>
             </View>
 
+            {/* Profile Photo Picker (Required) */}
+            <View style={styles.photoUploadSection}>
+              <View style={styles.photoAvatarWrap}>
+                {profilePhoto ? (
+                  <Image source={{ uri: profilePhoto.uri }} style={styles.photoAvatar} />
+                ) : (
+                  <View style={styles.photoPlaceholder}>
+                    <Ionicons name="camera" size={32} color="#9CA3AF" />
+                    <Text style={styles.photoPlaceholderText}>Photo Required</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.photoBtnCol}>
+                <Text style={styles.photoLabel}>
+                  Profile Photo <Text style={styles.required}>*</Text>
+                </Text>
+                <Text style={styles.photoHint}>Required for verified Digital Member ID Card.</Text>
+                <View style={styles.photoBtnRow}>
+                  <TouchableOpacity
+                    style={styles.photoActionBtn}
+                    onPress={pickPhotoFromLibrary}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="images-outline" size={16} color="#FFF" />
+                    <Text style={styles.photoActionText}>Choose File</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.photoActionBtn, styles.cameraActionBtn]}
+                    onPress={takePhotoWithCamera}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="camera-outline" size={16} color={theme.colors.primaryMaroon} />
+                    <Text style={styles.cameraActionText}>Camera</Text>
+                  </TouchableOpacity>
+
+                  {profilePhoto && (
+                    <TouchableOpacity
+                      style={styles.clearPhotoBtn}
+                      onPress={() => setProfilePhoto(null)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </View>
+
+            {/* Full Name */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
                 Full Name <Text style={styles.required}>*</Text>
@@ -311,7 +579,7 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
                 <Ionicons name="person-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="e.g. Alexander John"
+                  placeholder="e.g. S. Nandhakumar"
                   placeholderTextColor="#9CA3AF"
                   value={fullName}
                   onChangeText={setFullName}
@@ -319,6 +587,7 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
               </View>
             </View>
 
+            {/* Father's / Guardian's Name */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
                 Father's / Guardian's Name <Text style={styles.required}>*</Text>
@@ -327,7 +596,7 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
                 <Ionicons name="people-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="e.g. Robert John"
+                  placeholder="e.g. R. Shanmugam"
                   placeholderTextColor="#9CA3AF"
                   value={fatherName}
                   onChangeText={setFatherName}
@@ -335,6 +604,7 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
               </View>
             </View>
 
+            {/* Date of Birth */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
                 Date of Birth (YYYY-MM-DD) <Text style={styles.required}>*</Text>
@@ -343,14 +613,16 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
                 <Ionicons name="calendar-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="YYYY-MM-DD (e.g. 1995-04-20)"
+                  placeholder="YYYY-MM-DD (e.g. 1998-05-15)"
                   placeholderTextColor="#9CA3AF"
                   value={dob}
                   onChangeText={setDob}
                 />
               </View>
+              <Text style={styles.helperText}>Must be at least 18 years of age.</Text>
             </View>
 
+            {/* Gender */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
                 Gender <Text style={styles.required}>*</Text>
@@ -386,22 +658,83 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
                 ))}
               </View>
             </View>
+
+            {/* Blood Group */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Blood Group</Text>
+              <View style={styles.chipsWrap}>
+                {BLOOD_GROUPS.map((bg) => (
+                  <TouchableOpacity
+                    key={bg}
+                    style={[styles.smallChip, bloodGroup === bg && styles.smallChipActive]}
+                    onPress={() => setBloodGroup(bg)}
+                  >
+                    <Text
+                      style={[
+                        styles.smallChipText,
+                        bloodGroup === bg && styles.smallChipTextActive,
+                      ]}
+                    >
+                      {bg}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
           </View>
         )}
 
-        {/* STEP 2: CONTACT & SECURITY */}
+        {/* ============================================================ */}
+        {/* STEP 2: CONTACT & IDENTITY CARDS */}
+        {/* ============================================================ */}
         {currentStep === 2 && (
           <View style={styles.stepCard}>
             <View style={styles.stepHeaderRow}>
               <View style={styles.iconCircle}>
-                <Ionicons name="lock-closed" size={20} color={theme.colors.accentGold} />
+                <Ionicons name="card" size={20} color={theme.colors.accentGold} />
               </View>
-              <View>
-                <Text style={styles.cardHeaderTitle}>Contact & Login Access</Text>
-                <Text style={styles.cardHeaderSub}>Used to sign in to mobile and web portals</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardHeaderTitle}>Contact & Identity Verification</Text>
+                <Text style={styles.cardHeaderSub}>Used for login and member verification</Text>
               </View>
             </View>
 
+            {/* Country Code & Mobile Number */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>
+                Mobile Number (10 digits) <Text style={styles.required}>*</Text>
+              </Text>
+              <View style={styles.mobileRow}>
+                <TouchableOpacity
+                  style={styles.countryPickerBtn}
+                  onPress={() =>
+                    openPicker(
+                      'Select Country Code',
+                      COUNTRY_CODES.map((c, i) => ({ id: i, label: `${c.label} ${c.code}` })),
+                      (it) => setCountryCode(COUNTRY_CODES[it.id].code)
+                    )
+                  }
+                >
+                  <Text style={styles.countryPickerText}>{countryCode}</Text>
+                  <Ionicons name="chevron-down" size={14} color="#6B7280" />
+                </TouchableOpacity>
+
+                <View style={[styles.inputWrapper, { flex: 1 }]}>
+                  <Ionicons name="call-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="9876543210"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    value={mobile}
+                    onChangeText={setMobile}
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* Email */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
                 Email Address <Text style={styles.required}>*</Text>
@@ -410,7 +743,7 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
                 <Ionicons name="mail-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="name@example.com"
+                  placeholder="member@example.com"
                   placeholderTextColor="#9CA3AF"
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -420,33 +753,16 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
               </View>
             </View>
 
+            {/* Aadhaar Number */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
-                Mobile Number (10 digits) <Text style={styles.required}>*</Text>
+                Aadhaar Number (12 digits) <Text style={styles.required}>*</Text>
               </Text>
               <View style={styles.inputWrapper}>
-                <Ionicons name="call-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
+                <Ionicons name="id-card-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="9876543210"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="phone-pad"
-                  maxLength={10}
-                  value={mobile}
-                  onChangeText={setMobile}
-                />
-              </View>
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>
-                Aadhaar Number <Text style={styles.required}>*</Text>
-              </Text>
-              <View style={styles.inputWrapper}>
-                <Ionicons name="card-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="12-digit Aadhaar"
+                  placeholder="12-digit Aadhaar number"
                   placeholderTextColor="#9CA3AF"
                   keyboardType="number-pad"
                   maxLength={12}
@@ -456,15 +772,16 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
               </View>
             </View>
 
+            {/* Voter ID */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
-                Voter ID <Text style={styles.required}>*</Text>
+                Voter ID / EPIC <Text style={styles.required}>*</Text>
               </Text>
               <View style={styles.inputWrapper}>
-                <Ionicons name="id-card-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
+                <Ionicons name="card-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="Voter ID"
+                  placeholder="e.g. TN/01/001/000000"
                   placeholderTextColor="#9CA3AF"
                   autoCapitalize="characters"
                   value={voterId}
@@ -473,6 +790,7 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
               </View>
             </View>
 
+            {/* Password */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
                 Create Password (min. 8 chars) <Text style={styles.required}>*</Text>
@@ -497,6 +815,7 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
               </View>
             </View>
 
+            {/* Confirm Password */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
                 Confirm Password <Text style={styles.required}>*</Text>
@@ -516,19 +835,188 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
           </View>
         )}
 
-        {/* STEP 3: RESIDENTIAL ADDRESS */}
+        {/* ============================================================ */}
+        {/* STEP 3: LOCATION & CONSTITUENCIES (LIVE MASTER DATA) */}
+        {/* ============================================================ */}
         {currentStep === 3 && (
           <View style={styles.stepCard}>
             <View style={styles.stepHeaderRow}>
               <View style={styles.iconCircle}>
                 <Ionicons name="location" size={20} color={theme.colors.accentGold} />
               </View>
-              <View>
-                <Text style={styles.cardHeaderTitle}>Regional & Address Data</Text>
-                <Text style={styles.cardHeaderSub}>Connect to your localized district and taluk</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardHeaderTitle}>Regional & Administrative Details</Text>
+                <Text style={styles.cardHeaderSub}>Live Tamil Nadu districts, taluks & constituencies</Text>
               </View>
             </View>
 
+            {/* District Selector */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>
+                District <Text style={styles.required}>*</Text>
+              </Text>
+              <TouchableOpacity
+                style={styles.selectButton}
+                onPress={() =>
+                  openPicker(
+                    'Select District',
+                    districts.map((d) => ({
+                      id: d.id,
+                      label: d.name_ta ? `${d.name_en} (${d.name_ta})` : d.name_en,
+                    })),
+                    (it) => setSelectedDistrictId(it.id)
+                  )
+                }
+              >
+                <Text style={[styles.selectButtonText, !selectedDistrictId && styles.placeholderText]}>
+                  {selectedDistrictName}
+                </Text>
+                {loadingDistricts ? (
+                  <ActivityIndicator size="small" color={theme.colors.primaryMaroon} />
+                ) : (
+                  <Ionicons name="chevron-down" size={18} color="#6B7280" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Taluk / Block Selector */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>
+                Taluk / Block <Text style={styles.required}>*</Text>
+              </Text>
+              <TouchableOpacity
+                style={styles.selectButton}
+                onPress={() => {
+                  if (blocks.length === 0) {
+                    Alert.alert('Notice', 'Please select a District first.');
+                    return;
+                  }
+                  openPicker(
+                    'Select Taluk / Block',
+                    blocks.map((b) => ({
+                      id: b.id,
+                      label: b.name_ta ? `${b.name_en} (${b.name_ta})` : b.name_en,
+                    })),
+                    (it) => setSelectedBlockId(it.id)
+                  );
+                }}
+              >
+                <Text style={[styles.selectButtonText, !selectedBlockId && styles.placeholderText]}>
+                  {selectedBlockName}
+                </Text>
+                {loadingBlocks ? (
+                  <ActivityIndicator size="small" color={theme.colors.primaryMaroon} />
+                ) : (
+                  <Ionicons name="chevron-down" size={18} color="#6B7280" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Parliament Constituency Selector */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>
+                Parliament Constituency <Text style={styles.required}>*</Text>
+              </Text>
+              <TouchableOpacity
+                style={styles.selectButton}
+                onPress={() =>
+                  openPicker(
+                    'Select Parliament Constituency',
+                    parliaments.map((p) => ({
+                      id: p.id,
+                      label: p.name_ta ? `${p.name_en} (${p.name_ta})` : p.name_en,
+                    })),
+                    (it) => setSelectedParliamentId(it.id)
+                  )
+                }
+              >
+                <Text style={[styles.selectButtonText, !selectedParliamentId && styles.placeholderText]}>
+                  {selectedParlName}
+                </Text>
+                {loadingParliaments ? (
+                  <ActivityIndicator size="small" color={theme.colors.primaryMaroon} />
+                ) : (
+                  <Ionicons name="chevron-down" size={18} color="#6B7280" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Assembly Constituency Selector (Optional) */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Assembly Constituency (Optional)</Text>
+              <TouchableOpacity
+                style={styles.selectButton}
+                onPress={() => {
+                  if (assemblies.length === 0) {
+                    Alert.alert('Notice', 'No assemblies loaded for this parliament constituency.');
+                    return;
+                  }
+                  openPicker(
+                    'Select Assembly Constituency',
+                    assemblies.map((a) => ({
+                      id: a.id,
+                      label: a.name_ta ? `${a.name_en} (${a.name_ta})` : a.name_en,
+                    })),
+                    (it) => setSelectedAssemblyId(it.id)
+                  );
+                }}
+              >
+                <Text style={[styles.selectButtonText, !selectedAssemblyId && styles.placeholderText]}>
+                  {selectedAssemblyName}
+                </Text>
+                {loadingAssemblies ? (
+                  <ActivityIndicator size="small" color={theme.colors.primaryMaroon} />
+                ) : (
+                  <Ionicons name="chevron-down" size={18} color="#6B7280" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Village / Ward (Dropdown from Master Data or Custom Input) */}
+            {villages.length > 0 && (
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Village / Ward Unit (From Master Data)</Text>
+                <TouchableOpacity
+                  style={styles.selectButton}
+                  onPress={() =>
+                    openPicker(
+                      'Select Village / Ward',
+                      villages.map((v) => ({
+                        id: v.id,
+                        label: v.name_ta ? `${v.name_en} (${v.name_ta})` : v.name_en,
+                      })),
+                      (it) => setSelectedVillageId(it.id)
+                    )
+                  }
+                >
+                  <Text style={[styles.selectButtonText, !selectedVillageId && styles.placeholderText]}>
+                    {selectedVillageName}
+                  </Text>
+                  {loadingVillages ? (
+                    <ActivityIndicator size="small" color={theme.colors.primaryMaroon} />
+                  ) : (
+                    <Ionicons name="chevron-down" size={18} color="#6B7280" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Village Custom Name */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Village / Ward Name (Custom / Local)</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="map-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="e.g. Gandhi Nagar Ward 4"
+                  placeholderTextColor="#9CA3AF"
+                  value={villageCustom}
+                  onChangeText={setVillageCustom}
+                />
+              </View>
+            </View>
+
+            {/* Address Line 1 */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>
                 Address Line 1 <Text style={styles.required}>*</Text>
@@ -537,305 +1025,253 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
                 <Ionicons name="home-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="House / Door No., Street Name"
+                  placeholder="Door No., Street / Road Name"
                   placeholderTextColor="#9CA3AF"
-                  value={address1}
-                  onChangeText={setAddress1}
+                  value={addressLine1}
+                  onChangeText={setAddressLine1}
                 />
-              </View>
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Address Line 2 (Optional)</Text>
-              <View style={styles.inputWrapper}>
-                <Ionicons name="business-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Apartment, Landmark, Suite"
-                  placeholderTextColor="#9CA3AF"
-                  value={address2}
-                  onChangeText={setAddress2}
-                />
-              </View>
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>
-                Village / Town <Text style={styles.required}>*</Text>
-              </Text>
-              <View style={styles.inputWrapper}>
-                <Ionicons name="map-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="e.g. Green Park Village"
-                  placeholderTextColor="#9CA3AF"
-                  value={village}
-                  onChangeText={setVillage}
-                />
-              </View>
-            </View>
-
-            {/* District Selection Chips */}
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>
-                Select District <Text style={styles.required}>*</Text>
-              </Text>
-              <View style={styles.optionsWrap}>
-                {DISTRICTS.map((d) => (
-                  <TouchableOpacity
-                    key={d.id}
-                    style={[styles.selectOptionChip, districtId === d.id && styles.selectOptionChipActive]}
-                    onPress={() => handleDistrictChange(d.id)}
-                  >
-                    <Ionicons
-                      name="business"
-                      size={14}
-                      color={districtId === d.id ? '#FFF' : theme.colors.primaryMaroon}
-                      style={{ marginRight: 6 }}
-                    />
-                    <Text
-                      style={[
-                        styles.selectOptionText,
-                        districtId === d.id && styles.selectOptionTextActive,
-                      ]}
-                    >
-                      {d.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Taluk Selection Chips */}
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>
-                Select Taluk / Block <Text style={styles.required}>*</Text>
-              </Text>
-              <View style={styles.optionsWrap}>
-                {(TALUKS[districtId] || TALUKS[1]).map((t) => (
-                  <TouchableOpacity
-                    key={t.id}
-                    style={[styles.selectOptionChip, talukId === t.id && styles.selectOptionChipActive]}
-                    onPress={() => handleTalukChange(t.id)}
-                  >
-                    <Ionicons
-                      name="trail-sign-outline"
-                      size={14}
-                      color={talukId === t.id ? '#FFF' : theme.colors.primaryMaroon}
-                      style={{ marginRight: 6 }}
-                    />
-                    <Text
-                      style={[
-                        styles.selectOptionText,
-                        talukId === t.id && styles.selectOptionTextActive,
-                      ]}
-                    >
-                      {t.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.rowTwoCols}>
-              <View style={[styles.fieldGroup, { flex: 1, marginRight: 8 }]}>
-                <Text style={styles.label}>State</Text>
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={styles.textInput}
-                    value={stateName}
-                    onChangeText={setStateName}
-                  />
-                </View>
-              </View>
-              <View style={[styles.fieldGroup, { flex: 1, marginLeft: 8 }]}>
-                <Text style={styles.label}>
-                  Pincode <Text style={styles.required}>*</Text>
-                </Text>
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="600001"
-                    placeholderTextColor="#9CA3AF"
-                    keyboardType="numeric"
-                    value={pincode}
-                    onChangeText={setPincode}
-                  />
-                </View>
               </View>
             </View>
           </View>
         )}
 
-        {/* STEP 4: MEMBERSHIP TIER & AGREEMENT */}
+        {/* ============================================================ */}
+        {/* STEP 4: ROLE & MEMBERSHIP DECLARATION */}
+        {/* ============================================================ */}
         {currentStep === 4 && (
           <View style={styles.stepCard}>
             <View style={styles.stepHeaderRow}>
               <View style={styles.iconCircle}>
-                <Ionicons name="card" size={20} color={theme.colors.accentGold} />
+                <Ionicons name="ribbon" size={20} color={theme.colors.accentGold} />
               </View>
-              <View>
-                <Text style={styles.cardHeaderTitle}>Membership & Unit</Text>
-                <Text style={styles.cardHeaderSub}>Select your membership plan and local division</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardHeaderTitle}>Role & Declaration</Text>
+                <Text style={styles.cardHeaderSub}>Review details and agree to NMPI membership terms</Text>
               </View>
             </View>
 
-            {/* Membership Tier Cards */}
-            <Text style={styles.label}>
-              Choose Membership Tier <Text style={styles.required}>*</Text>
-            </Text>
-            {MEMBERSHIP_TYPES.map((tier) => (
-              <TouchableOpacity
-                key={tier.id}
-                style={[
-                  styles.tierCard,
-                  membershipTypeId === tier.id && styles.tierCardActive,
-                ]}
-                onPress={() => setMembershipTypeId(tier.id)}
-              >
-                <View style={styles.tierRadioRow}>
-                  <Ionicons
-                    name={membershipTypeId === tier.id ? 'radio-button-on' : 'radio-button-off'}
-                    size={20}
-                    color={membershipTypeId === tier.id ? theme.colors.primaryMaroon : '#9CA3AF'}
-                  />
-                  <Text style={styles.tierName}>{tier.name}</Text>
-                  <View style={styles.tierBadge}>
-                    <Text style={styles.tierFee}>{tier.fee}</Text>
-                  </View>
-                </View>
-                <Text style={styles.tierDesc}>{tier.desc}</Text>
-              </TouchableOpacity>
-            ))}
-
-            {/* Local Unit Selection */}
-            <View style={[styles.fieldGroup, { marginTop: 16 }]}>
+            {/* Role Options */}
+            <View style={styles.fieldGroup}>
               <Text style={styles.label}>
-                Assign Local Community Unit <Text style={styles.required}>*</Text>
+                Join As <Text style={styles.required}>*</Text>
               </Text>
-              <View style={styles.optionsWrap}>
-                {(UNITS[talukId] || UNITS[1]).map((u) => (
-                  <TouchableOpacity
-                    key={u.id}
-                    style={[styles.selectOptionChip, unitId === u.id && styles.selectOptionChipActive]}
-                    onPress={() => setUnitId(u.id)}
-                  >
-                    <Ionicons
-                      name="flag-outline"
-                      size={14}
-                      color={unitId === u.id ? '#FFF' : theme.colors.primaryMaroon}
-                      style={{ marginRight: 6 }}
-                    />
-                    <Text
-                      style={[
-                        styles.selectOptionText,
-                        unitId === u.id && styles.selectOptionTextActive,
-                      ]}
-                    >
-                      {u.name}
+              {JOIN_ROLE_OPTIONS.map((r) => (
+                <TouchableOpacity
+                  key={r.id}
+                  style={[styles.roleOptionCard, roleId === r.id && styles.roleOptionCardActive]}
+                  onPress={() => {
+                    setRoleId(r.id);
+                    setJoinAs(r.name);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.roleRadio}>
+                    {roleId === r.id && <View style={styles.roleRadioDot} />}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.roleTitle, roleId === r.id && styles.roleTitleActive]}>
+                      {r.name}
                     </Text>
-                  </TouchableOpacity>
-                ))}
+                    <Text style={styles.roleDesc}>{r.desc}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Custom Designation (Optional) */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Designation / Padhavi (Optional)</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="briefcase-outline" size={18} color="#9CA3AF" style={styles.fieldIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="e.g. Unit Coordinator, Youth Organizer"
+                  placeholderTextColor="#9CA3AF"
+                  value={designation}
+                  onChangeText={setDesignation}
+                />
               </View>
             </View>
 
-            {/* Terms and Consent Checkbox */}
+            {/* Quick Summary Review Box */}
+            <View style={styles.summaryBox}>
+              <Text style={styles.summaryTitle}>Application Summary</Text>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Applicant:</Text>
+                <Text style={styles.summaryVal}>{fullName}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Mobile:</Text>
+                <Text style={styles.summaryVal}>{countryCode} {mobile}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>District:</Text>
+                <Text style={styles.summaryVal}>{selectedDistrictName}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Taluk / Block:</Text>
+                <Text style={styles.summaryVal}>{selectedBlockName}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Parliament:</Text>
+                <Text style={styles.summaryVal}>{selectedParlName}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Photo:</Text>
+                <Text style={[styles.summaryVal, { color: '#059669', fontWeight: '800' }]}>
+                  {profilePhoto ? '✓ Photo Attached' : '✗ Missing'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Consent Terms Checkbox */}
             <TouchableOpacity
               style={styles.consentRow}
               onPress={() => setConsentTerms(!consentTerms)}
               activeOpacity={0.8}
             >
-              <Ionicons
-                name={consentTerms ? 'checkbox' : 'square-outline'}
-                size={24}
-                color={consentTerms ? theme.colors.primaryMaroon : '#6B7280'}
-              />
+              <View style={[styles.checkbox, consentTerms && styles.checkboxActive]}>
+                {consentTerms && <Ionicons name="checkmark" size={16} color="#FFF" />}
+              </View>
               <Text style={styles.consentText}>
-                I solemnly affirm that I accept and adhere to the Constitution, bylaws, and community standards of the Organization. All statements given here are true and complete.
+                I hereby declare that the details provided are true and correct. I agree to abide by the constitution, values and rules of Netaji Makkal Pathukappu Iyakkam (NMPI).
               </Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Navigation Step Buttons */}
-        <View style={styles.actionButtonsRow}>
-          {currentStep > 1 && (
-            <TouchableOpacity style={styles.prevBtn} onPress={handleBack} disabled={isSubmitting}>
-              <Ionicons name="arrow-back" size={16} color={theme.colors.primaryMaroon} />
-              <Text style={styles.prevBtnText}>Previous</Text>
-            </TouchableOpacity>
-          )}
+        {/* Navigation Buttons (Back & Next/Submit) */}
+        <View style={styles.footerRow}>
+          <TouchableOpacity style={styles.navBackBtn} onPress={handleBack} activeOpacity={0.8}>
+            <Ionicons name="chevron-back" size={18} color="#4B5563" />
+            <Text style={styles.navBackText}>
+              {currentStep === 1 ? 'Cancel' : 'Previous'}
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.nextBtn, currentStep === 1 && { flex: 1 }]}
+            style={[styles.navNextBtn, isSubmitting && { opacity: 0.7 }]}
             onPress={handleNext}
             disabled={isSubmitting}
+            activeOpacity={0.85}
           >
             {isSubmitting ? (
-              <ActivityIndicator color="#FFF" size="small" />
+              <ActivityIndicator size="small" color="#FFF" />
             ) : (
               <>
-                <Text style={styles.nextBtnText}>
-                  {currentStep === totalSteps ? 'Submit Application' : 'Continue'}
+                <Text style={styles.navNextText}>
+                  {currentStep === totalSteps ? 'Complete Enrollment' : 'Continue'}
                 </Text>
                 <Ionicons
-                  name={currentStep === totalSteps ? 'checkmark-circle' : 'arrow-forward'}
+                  name={currentStep === totalSteps ? 'checkmark-circle' : 'chevron-forward'}
                   size={18}
                   color="#FFF"
-                  style={{ marginLeft: 6 }}
                 />
               </>
             )}
           </TouchableOpacity>
         </View>
-
-        {/* Footer Login Link */}
-        <View style={styles.footerSignInWrap}>
-          <Text style={styles.alreadyHaveText}>Already registered as a member?</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-            <Text style={styles.signInLinkText}>Sign In to Account</Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
 
-      {/* REGISTRATION SUCCESS MODAL */}
+      {/* Generic Item Picker Modal (Districts, Taluks, Parliaments, etc.) */}
+      <Modal
+        visible={pickerModal.visible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPickerModal((p) => ({ ...p, visible: false }))}
+      >
+        <View style={styles.pickerBackdrop}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerSheetTitle}>{pickerModal.title}</Text>
+              <TouchableOpacity
+                onPress={() => setPickerModal((p) => ({ ...p, visible: false }))}
+                style={styles.pickerCloseBtn}
+              >
+                <Ionicons name="close" size={22} color="#1F2937" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Search Input in Picker */}
+            <View style={styles.pickerSearchWrap}>
+              <Ionicons name="search" size={18} color="#9CA3AF" />
+              <TextInput
+                style={styles.pickerSearchInput}
+                placeholder="Search..."
+                placeholderTextColor="#9CA3AF"
+                value={pickerSearch}
+                onChangeText={setPickerSearch}
+                autoCorrect={false}
+              />
+              {pickerSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setPickerSearch('')}>
+                  <Ionicons name="close-circle" size={18} color="#9CA3AF" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView style={{ maxHeight: 380 }}>
+              {filteredPickerItems.length === 0 ? (
+                <View style={{ padding: 24, alignItems: 'center' }}>
+                  <Text style={{ color: '#9CA3AF', fontSize: 14 }}>No matches found.</Text>
+                </View>
+              ) : (
+                filteredPickerItems.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.pickerItemRow}
+                    onPress={() => pickerModal.onSelect(item)}
+                  >
+                    <Text style={styles.pickerItemLabel}>{item.label}</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Success Dialog Modal */}
       <Modal visible={!!successData} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalIconWrap}>
+        <View style={styles.successBackdrop}>
+          <View style={styles.successCard}>
+            <View style={styles.successIconBadge}>
               <Ionicons name="checkmark-done" size={38} color="#FFF" />
             </View>
-            <Text style={styles.modalTitle}>Application Submitted!</Text>
-            <Text style={styles.modalSubtitle}>
-              Your membership registration has been received and entered into the community database.
+            <Text style={styles.successTitle}>Welcome to NMPI!</Text>
+            <Text style={styles.successSub}>
+              Your member application has been registered successfully.
             </Text>
 
-            <View style={styles.modalDetailsBox}>
-              <View style={styles.modalDetailRow}>
-                <Text style={styles.detailLabel}>Application No:</Text>
-                <Text style={styles.detailValue}>
-                  {successData?.application_number || 'APP-2026-PENDING'}
-                </Text>
+            {successData && (
+              <View style={styles.successDetailsBox}>
+                <View style={styles.successRow}>
+                  <Text style={styles.successLabel}>Member ID</Text>
+                  <Text style={styles.successValBadge}>{successData.member_id || 'Generating...'}</Text>
+                </View>
+                {successData.application_number && (
+                  <View style={styles.successRow}>
+                    <Text style={styles.successLabel}>Application No</Text>
+                    <Text style={styles.successVal}>{successData.application_number}</Text>
+                  </View>
+                )}
+                <View style={styles.successRow}>
+                  <Text style={styles.successLabel}>Registered Email</Text>
+                  <Text style={styles.successVal}>{email}</Text>
+                </View>
               </View>
-              <View style={styles.modalDetailRow}>
-                <Text style={styles.detailLabel}>Member Name:</Text>
-                <Text style={styles.detailValue}>{fullName}</Text>
-              </View>
-              <View style={styles.modalDetailRow}>
-                <Text style={styles.detailLabel}>Approval Status:</Text>
-                <Text style={[styles.detailValue, { color: '#F59E0B', fontWeight: '800' }]}>
-                  PENDING VERIFICATION
-                </Text>
-              </View>
-            </View>
+            )}
 
-            <Text style={styles.modalNote}>
-              You can now sign in using your email ({email}) and password to view your application status and temporary digital profile.
-            </Text>
-
-            <TouchableOpacity style={styles.modalProceedBtn} onPress={handleSuccessClose}>
-              <Text style={styles.modalProceedBtnText}>Proceed to Member Login</Text>
-              <Ionicons name="arrow-forward" size={18} color="#FFF" style={{ marginLeft: 8 }} />
+            <TouchableOpacity
+              style={styles.successDoneBtn}
+              onPress={() => {
+                setSuccessData(null);
+                navigation.navigate('Login');
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.successDoneText}>Proceed to Sign In</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -847,11 +1283,11 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
 const styles = StyleSheet.create({
   keyboardContainer: {
     flex: 1,
-    backgroundColor: theme.colors.backgroundLight,
+    backgroundColor: '#F9FAFB',
   },
   topHeader: {
     backgroundColor: theme.colors.primaryMaroon,
-    paddingTop: Platform.OS === 'ios' ? 50 : 35,
+    paddingTop: Platform.OS === 'ios' ? 48 : 20,
     paddingBottom: 16,
     paddingHorizontal: 16,
     flexDirection: 'row',
@@ -861,31 +1297,25 @@ const styles = StyleSheet.create({
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    gap: 4,
   },
   backButtonText: {
     color: '#FFF',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
-    marginLeft: 4,
   },
   headerTitle: {
     color: '#FFF',
     fontSize: 16,
     fontWeight: '800',
-    letterSpacing: 0.3,
   },
-  placeholder: {
-    width: 60,
-  },
+  placeholder: { width: 40 },
   progressContainer: {
-    backgroundColor: theme.colors.primaryMaroonDark,
+    backgroundColor: '#FFF',
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
   },
   stepInfoRow: {
     flexDirection: 'row',
@@ -894,20 +1324,19 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   stepCounterText: {
-    color: theme.colors.accentGold,
     fontSize: 12,
     fontWeight: '800',
+    color: theme.colors.primaryMaroon,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   stepTitleText: {
-    color: '#FFF',
     fontSize: 13,
     fontWeight: '700',
+    color: '#374151',
   },
   progressBarTrack: {
     height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#E5E7EB',
     borderRadius: 3,
     overflow: 'hidden',
   },
@@ -916,9 +1345,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.accentGold,
     borderRadius: 3,
   },
-  scrollView: {
-    flex: 1,
-  },
+  scrollView: { flex: 1 },
   scrollContent: {
     padding: 16,
     paddingBottom: 40,
@@ -928,40 +1355,124 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 2,
-    marginBottom: 16,
   },
   stepHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
     marginBottom: 20,
+    paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
-    paddingBottom: 12,
   },
   iconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: theme.colors.primaryMaroon,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   cardHeaderTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: theme.colors.primaryMaroon,
+    color: '#111827',
   },
   cardHeaderSub: {
     fontSize: 12,
-    color: theme.colors.textMuted,
+    color: '#6B7280',
     marginTop: 2,
+  },
+  photoUploadSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    backgroundColor: '#FFFBEB',
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    marginBottom: 20,
+  },
+  photoAvatarWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    borderColor: theme.colors.accentGold,
+    overflow: 'hidden',
+    backgroundColor: '#FFF',
+  },
+  photoAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  photoPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  photoPlaceholderText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#9CA3AF',
+    marginTop: 2,
+  },
+  photoBtnCol: { flex: 1 },
+  photoLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  photoHint: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginTop: 2,
+    marginBottom: 10,
+  },
+  photoBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  photoActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: theme.colors.primaryMaroon,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  photoActionText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cameraActionBtn: {
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: theme.colors.primaryMaroon,
+  },
+  cameraActionText: {
+    color: theme.colors.primaryMaroon,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  clearPhotoBtn: {
+    padding: 7,
+    borderRadius: 8,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   fieldGroup: {
     marginBottom: 16,
@@ -969,19 +1480,25 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '700',
-    color: theme.colors.textDark,
+    color: '#374151',
     marginBottom: 6,
   },
   required: {
-    color: '#EF4444',
+    color: '#DC2626',
+    fontWeight: '800',
+  },
+  helperText: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginTop: 4,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: '#D1D5DB',
     borderRadius: 10,
+    backgroundColor: '#FFF',
     paddingHorizontal: 12,
   },
   fieldIcon: {
@@ -989,16 +1506,16 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 11,
     fontSize: 14,
-    color: theme.colors.textDark,
+    color: '#111827',
   },
   eyeBtn: {
     padding: 6,
   },
   genderRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
   genderChip: {
     flex: 1,
@@ -1006,10 +1523,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#D1D5DB',
+    borderRadius: 10,
+    backgroundColor: '#FFF',
   },
   genderChipActive: {
     backgroundColor: theme.colors.primaryMaroon,
@@ -1018,246 +1535,345 @@ const styles = StyleSheet.create({
   genderChipText: {
     fontSize: 12,
     fontWeight: '700',
-    color: theme.colors.textDark,
+    color: '#374151',
   },
   genderChipTextActive: {
     color: '#FFF',
   },
-  optionsWrap: {
+  chipsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-  selectOptionChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  smallChip: {
+    paddingVertical: 6,
     paddingHorizontal: 12,
-    paddingVertical: 9,
-    backgroundColor: '#F9FAFB',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginBottom: 4,
+    borderColor: '#D1D5DB',
+    backgroundColor: '#FFF',
   },
-  selectOptionChipActive: {
+  smallChipActive: {
     backgroundColor: theme.colors.primaryMaroon,
     borderColor: theme.colors.primaryMaroon,
   },
-  selectOptionText: {
+  smallChipText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: theme.colors.textDark,
-  },
-  selectOptionTextActive: {
-    color: '#FFF',
     fontWeight: '700',
+    color: '#374151',
   },
-  rowTwoCols: {
+  smallChipTextActive: {
+    color: '#FFF',
+  },
+  mobileRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 8,
   },
-  tierCard: {
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    backgroundColor: '#FAFAFA',
-  },
-  tierCardActive: {
-    borderColor: theme.colors.accentGold,
-    backgroundColor: '#FEFCE8',
-    borderWidth: 1.5,
-  },
-  tierRadioRow: {
+  countryPickerBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    backgroundColor: '#F9FAFB',
   },
-  tierName: {
+  countryPickerText: {
     fontSize: 14,
-    fontWeight: '800',
-    color: theme.colors.textDark,
-    marginLeft: 8,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  selectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 10,
+    backgroundColor: '#FFF',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  selectButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
     flex: 1,
   },
-  tierBadge: {
+  placeholderText: {
+    color: '#9CA3AF',
+    fontWeight: '400',
+  },
+  roleOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFF',
+    marginBottom: 10,
+  },
+  roleOptionCardActive: {
+    borderColor: theme.colors.primaryMaroon,
+    backgroundColor: '#FFF9F9',
+  },
+  roleRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: theme.colors.primaryMaroon,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  roleRadioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: theme.colors.primaryMaroon,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
   },
-  tierFee: {
-    color: theme.colors.accentGold,
-    fontSize: 11,
+  roleTitle: {
+    fontSize: 14,
     fontWeight: '800',
+    color: '#111827',
   },
-  tierDesc: {
+  roleTitleActive: {
+    color: theme.colors.primaryMaroon,
+  },
+  roleDesc: {
     fontSize: 12,
-    color: theme.colors.textMuted,
-    marginLeft: 28,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  summaryBox: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 16,
+  },
+  summaryTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 3,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  summaryVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#111827',
   },
   consentRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginTop: 16,
-    padding: 12,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+    gap: 10,
+    marginTop: 6,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#9CA3AF',
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  checkboxActive: {
+    backgroundColor: theme.colors.primaryMaroon,
+    borderColor: theme.colors.primaryMaroon,
   },
   consentText: {
     flex: 1,
     fontSize: 12,
-    color: theme.colors.textDark,
+    color: '#4B5563',
     lineHeight: 18,
-    marginLeft: 10,
   },
-  actionButtonsRow: {
+  footerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 12,
-    marginTop: 8,
+    marginTop: 20,
   },
-  prevBtn: {
+  navBackBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     paddingVertical: 14,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: theme.colors.primaryMaroon,
-    backgroundColor: '#FFF',
+    borderRadius: 12,
+    backgroundColor: '#E5E7EB',
   },
-  prevBtnText: {
-    color: theme.colors.primaryMaroon,
-    fontWeight: '800',
+  navBackText: {
     fontSize: 14,
-    marginLeft: 6,
+    fontWeight: '700',
+    color: '#374151',
   },
-  nextBtn: {
+  navNextBtn: {
     flex: 2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: 12,
     backgroundColor: theme.colors.primaryMaroon,
-    shadowColor: theme.colors.primaryMaroon,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 3,
   },
-  nextBtnText: {
-    color: '#FFF',
-    fontWeight: '800',
-    fontSize: 15,
-  },
-  footerSignInWrap: {
-    marginTop: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-  },
-  alreadyHaveText: {
-    fontSize: 13,
-    color: theme.colors.textMuted,
-    marginBottom: 4,
-  },
-  signInLinkText: {
+  navNextText: {
     fontSize: 14,
     fontWeight: '800',
-    color: theme.colors.primaryMaroon,
-    textDecorationLine: 'underline',
+    color: '#FFF',
   },
-  modalOverlay: {
+  pickerBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerSheet: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 36,
+    maxHeight: '80%',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 14,
+  },
+  pickerSheetTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  pickerCloseBtn: {
+    padding: 4,
+  },
+  pickerSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  pickerSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#111827',
+  },
+  pickerItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  pickerItemLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  successBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: 24,
   },
-  modalCard: {
+  successCard: {
+    width: '100%',
+    maxWidth: 360,
     backgroundColor: '#FFF',
     borderRadius: 20,
     padding: 24,
-    width: '100%',
-    maxWidth: 380,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 15,
-    elevation: 10,
   },
-  modalIconWrap: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: '#10B981',
-    justifyContent: 'center',
+  successIconBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#059669',
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 16,
   },
-  modalTitle: {
+  successTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: theme.colors.textDark,
+    color: '#111827',
     marginBottom: 6,
   },
-  modalSubtitle: {
+  successSub: {
     fontSize: 13,
-    color: theme.colors.textMuted,
+    color: '#6B7280',
     textAlign: 'center',
-    lineHeight: 18,
     marginBottom: 18,
   },
-  modalDetailsBox: {
+  successDetailsBox: {
     width: '100%',
     backgroundColor: '#F9FAFB',
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginBottom: 14,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    gap: 8,
   },
-  modalDetailRow: {
+  successRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  detailLabel: {
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    fontWeight: '600',
-  },
-  detailValue: {
-    fontSize: 12,
-    color: theme.colors.textDark,
-    fontWeight: '700',
-  },
-  modalNote: {
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 16,
-    marginBottom: 20,
-  },
-  modalProceedBtn: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.primaryMaroon,
-    width: '100%',
-    paddingVertical: 14,
-    borderRadius: 10,
   },
-  modalProceedBtnText: {
-    color: '#FFF',
+  successLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  successVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  successValBadge: {
+    fontSize: 13,
     fontWeight: '800',
-    fontSize: 15,
+    color: theme.colors.primaryMaroon,
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  successDoneBtn: {
+    width: '100%',
+    backgroundColor: theme.colors.primaryMaroon,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  successDoneText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

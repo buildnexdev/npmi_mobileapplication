@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { apiClient } from '../services/apiClient';
 
 export interface MemberData {
@@ -102,20 +103,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const registerMember = async (formPayload: any) => {
     try {
       const formData = new FormData();
-      Object.keys(formPayload).forEach((key) => {
+      for (const key of Object.keys(formPayload)) {
         const val = formPayload[key];
-        if (val === undefined || val === null || val === '') return;
-        if (['confirm_password', 'consent_terms'].includes(key)) return;
-        if (key === 'profile_image' && typeof val === 'object') {
-          formData.append('profile_image', val as any);
-          return;
+        if (val === undefined || val === null || val === '') continue;
+        if (['confirm_password', 'consent_terms'].includes(key)) continue;
+
+        if (key === 'profile_image') {
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            if (val instanceof File || val instanceof Blob) {
+              formData.append('profile_image', val);
+            } else if (typeof val === 'object' && val.uri) {
+              const fetchRes = await fetch(val.uri);
+              const blob = await fetchRes.blob();
+              formData.append('profile_image', blob, val.name || 'profile.jpg');
+            } else if (typeof val === 'string' && (val.startsWith('blob:') || val.startsWith('data:'))) {
+              const fetchRes = await fetch(val);
+              const blob = await fetchRes.blob();
+              formData.append('profile_image', blob, 'profile.jpg');
+            }
+          } else if (typeof val === 'object' && val.uri) {
+            formData.append('profile_image', {
+              uri: val.uri,
+              name: val.name || 'profile.jpg',
+              type: val.type || 'image/jpeg',
+            } as any);
+          }
+          continue;
         }
+
         formData.append(key, String(val).trim());
-      });
+      }
 
       const response = await apiClient.post('/members/register', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 30000,
+        timeout: 45000,
       });
 
       setPrefilledEmail(formPayload.email);
