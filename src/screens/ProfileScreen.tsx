@@ -6,8 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  Alert,
-  Platform,
+  Modal,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +16,7 @@ import { useAuth } from '../context/AuthContext';
 
 export const ProfileScreen: React.FC<any> = ({ navigation }) => {
   const { user, logout } = useAuth();
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const member = user?.member;
   const name = member?.full_name || user?.email || 'Member';
@@ -27,6 +27,7 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
     try {
       setLoggingOut(true);
       await logout();
+      setShowLogoutModal(false);
       const rootNav = navigation.getParent() || navigation;
       try {
         rootNav.dispatch(
@@ -40,30 +41,14 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
       }
     } catch (e) {
       console.error('Logout error:', e);
+      setShowLogoutModal(false);
     } finally {
       setLoggingOut(false);
     }
   };
 
   const handleLogout = () => {
-    if (Platform.OS === 'web') {
-      const confirmed = typeof window !== 'undefined'
-        ? window.confirm('Sign out of your NMPI member account?')
-        : true;
-      if (confirmed) {
-        performLogout();
-      }
-      return;
-    }
-
-    Alert.alert('Sign Out', 'Sign out of your NMPI member account?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: performLogout,
-      },
-    ]);
+    setShowLogoutModal(true);
   };
 
   const rows = [
@@ -119,17 +104,55 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
         style={styles.logoutBtn}
         onPress={handleLogout}
         activeOpacity={0.85}
-        disabled={loggingOut}
       >
-        {loggingOut ? (
-          <ActivityIndicator size="small" color="#FFF" />
-        ) : (
-          <>
-            <Ionicons name="log-out-outline" size={18} color="#FFF" />
-            <Text style={styles.logoutText}>Sign Out</Text>
-          </>
-        )}
+        <Ionicons name="log-out-outline" size={18} color="#FFF" />
+        <Text style={styles.logoutText}>Sign Out</Text>
       </TouchableOpacity>
+
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!loggingOut) setShowLogoutModal(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="log-out-outline" size={30} color={theme.colors.primaryMaroon} />
+            </View>
+            <Text style={styles.modalTitle}>Sign Out</Text>
+            <Text style={styles.modalMessage}>
+              Are you sure you want to sign out of your NMPI member account?
+            </Text>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowLogoutModal(false)}
+                disabled={loggingOut}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalConfirmBtn}
+                onPress={performLogout}
+                disabled={loggingOut}
+                activeOpacity={0.8}
+              >
+                {loggingOut ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Sign Out</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -233,4 +256,78 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   logoutText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  modalIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FBE8EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: theme.colors.textDark,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: theme.colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#F1F3F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#495057',
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: theme.colors.primaryMaroon,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalConfirmText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
 });
