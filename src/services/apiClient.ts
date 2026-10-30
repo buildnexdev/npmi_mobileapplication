@@ -10,15 +10,12 @@ import { Platform } from 'react-native';
  * - Production → https://api.nmpi.in/api
  */
 const getBaseUrl = () => {
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, '');
+  const customUrl = (process.env as any)?.EXPO_PUBLIC_API_URL;
+  if (customUrl) {
+    return String(customUrl).replace(/\/$/, '');
   }
-  // Uncomment for production builds:
-  // return 'https://api.nmpi.in/api';
-  if (Platform.OS === 'android') {
-    return 'http://10.0.2.2:5000/api';
-  }
-  return 'http://localhost:5000/api';
+  // Live API URL used across website & webapplication
+  return 'https://api.nmpi.in/api';
 };
 
 export const API_BASE_URL = getBaseUrl();
